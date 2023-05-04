@@ -10,6 +10,13 @@ const bcrypt = require("bcrypt");
 const app = express();
 const routes = require("./routes.js");
 const auth = require("./auth.js");
+const http = require('http').createServer(app);
+const io = require('socket.io')(http);
+const MongoStore = require('connect-mongo')(session);
+const URI = process.env.MONGO_URI;
+const store = new MongoStore({ url: URI });
+const passportSocketIo = require('passport.socketio')
+const cookieParser = require('cookie-parser')
 
 app.set("view engine", "pug");
 app.set("views", "./views/pug");
@@ -35,6 +42,29 @@ myDB(async (client) => {
   routes(app, myDataBase);
   auth(app, myDataBase);
   const LocalStrategy = require("passport-local");
+  let currentUsers = 0;
+  io.on('connection', (socket) => {
+    ++currentUsers;
+    io.emit('user', {
+      username: socket.request.user.username,
+      currentUsers,
+      connected: true
+    });
+    socket.on('chat message', (message) => {
+      io.emit('chat message', { username: socket.request.user.username, message });
+    });
+    console.log('A user has connected');
+    socket.on('disconnect', () => {
+      console.log('A user has disconnected');
+      --currentUsers;
+      io.emit('user', {
+        username: socket.request.user.username,
+        currentUsers,
+        connected: false
+      });
+    });
+  });
+
 
   // Be sure to change the title
 
@@ -45,8 +75,19 @@ myDB(async (client) => {
   });
 });
 // app.listen out here...
+function onAuthorizeSuccess(data, accept) {
+  console.log('successful connection to socket.io');
+
+  accept(null, true);
+}
+
+function onAuthorizeFail(data, message, error, accept) {
+  if (error) throw new Error(message);
+  console.log('failed connection to socket.io:', message);
+  accept(null, false);
+}
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+http.listen(PORT, () => {
   console.log("Listening on port " + PORT);
 });
